@@ -1267,6 +1267,7 @@ export function StrategyBacktest({ loadCandidate, onLoadConsumed }: {
     return values[values.length - 1] / values[0] - 1
   }, [result?.benchmark_curve])
 
+  const isCandidateExecution = s?.mode === 'full' && s?.full_kind === 'candidate_execution'
   const strategyReturn = pick('total_return') as number | null
   const excessReturn = strategyReturn != null && benchmarkReturn != null
     ? strategyReturn - benchmarkReturn
@@ -1287,27 +1288,34 @@ export function StrategyBacktest({ loadCandidate, onLoadConsumed }: {
     lines.push(`策略名称,${name}`)
     if (result.strategy_info?.id) lines.push(`策略ID,${result.strategy_info.id}`)
     lines.push(`回测区间,${start} ~ ${end}`)
-    lines.push(`净值曲线天数,${result.equity_curve?.length ?? 0}`)
+    lines.push(`${isCandidateExecution ? '样本退出日数' : '净值曲线天数'},${result.equity_curve?.length ?? 0}`)
     lines.push(`完成交易数,${result.trades?.length ?? 0}`)
-    lines.push(`总收益,${pct(strategyReturn)}`)
-    lines.push(`年化收益,${pct(s.annual_return)}`)
-    lines.push(`同期基准,${pct(benchmarkReturn)}`)
-    lines.push(`超额收益,${pct(excessReturn)}`)
+    if (isCandidateExecution) {
+      lines.push('统计口径,独立候选交易样本；样本曲线按退出日平均持有收益连乘，不代表账户净值')
+      lines.push(`样本曲线累计变化,${pct(strategyReturn)}`)
+    } else {
+      lines.push(`总收益,${pct(strategyReturn)}`)
+      lines.push(`年化收益,${pct(s.annual_return)}`)
+      lines.push(`同期基准,${pct(benchmarkReturn)}`)
+      lines.push(`超额收益,${pct(excessReturn)}`)
+    }
     for (const [label, key] of [
       ['夏普比率', 'sharpe'], ['索提诺', 'sortino'], ['最大回撤', 'max_drawdown'],
       ['胜率', 'win_rate'], ['平均收益', 'avg_return'], ['中位数收益', 'median_return'],
       ['盈亏比', 'profit_factor'], ['最终权益', 'final_equity'], ['平均持仓天数', 'avg_duration'],
     ] as const) {
+      if (isCandidateExecution && ['sharpe', 'sortino', 'max_drawdown', 'final_equity'].includes(key)) continue
       const v = s[key as keyof typeof s]
       if (v != null) lines.push(`${label},${key.includes('return') || key === 'win_rate' || key === 'max_drawdown' ? pct(v) : num(v)}`)
     }
 
     const ddMap = new Map((result.drawdown_curve ?? []).map(r => [r.date, r.value]))
     const benchMap = new Map((result.benchmark_curve ?? []).map(r => [r.date, r.close ?? r.value]))
-    lines.push('', '# 净值曲线', 'date,equity,cash,positions,exposure,drawdown,benchmark')
+    lines.push('', isCandidateExecution ? '# 样本收益曲线（非账户净值）' : '# 净值曲线',
+      isCandidateExecution ? 'date,sample_value,cash,exit_samples,exposure,sample_drawdown,benchmark' : 'date,equity,cash,positions,exposure,drawdown,benchmark')
     for (const r of result.equity_curve ?? []) {
       lines.push([r.date, num(r.value), num(r.cash), num(r.positions), num(r.exposure),
-        num(ddMap.get(r.date)), num(benchMap.get(r.date))].join(','))
+        num(ddMap.get(r.date)), isCandidateExecution ? '' : num(benchMap.get(r.date))].join(','))
     }
 
     lines.push('', '# 交易明细',
@@ -2309,26 +2317,41 @@ export function StrategyBacktest({ loadCandidate, onLoadConsumed }: {
               </div>
             )}
 
+            {isCandidateExecution && (
+              <p className="rounded-card border border-accent/25 bg-accent/5 px-3 py-2 text-xs leading-5 text-secondary">
+                全量模拟评估独立候选交易，允许持仓重叠且不受资金限制。请用平均单笔收益、中位收益和胜率比较；下方样本曲线按退出日平均持有收益连乘，不代表账户盈亏。资金收益与风险请查看仓位模拟。
+              </p>
+            )}
+
             {/* 统计卡片 */}
             <div className="rounded-card border border-border bg-surface p-4">
               <div className="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-3">
-                <Stat label={<MetricLabel label="总收益" metric="totalReturn" />} value={strategyReturn != null ? fmtPct(strategyReturn) : '—'}
-                  color={statValueColor(strategyReturn)} />
-                <Stat label={<MetricLabel label="年化" metric="annualReturn" />} value={pick('annual_return') != null ? fmtPct(pick('annual_return') as number) : '—'}
-                  color={statValueColor(pick('annual_return') as number)} />
-                <Stat label={<MetricLabel label="同期上证" metric="benchmarkReturn" />} value={benchmarkReturn != null ? fmtPct(benchmarkReturn) : '—'}
-                  color={statValueColor(benchmarkReturn)} />
-                <Stat label={<MetricLabel label="超额收益" metric="excessReturn" />} value={excessReturn != null ? fmtPct(excessReturn) : '—'}
-                  color={statValueColor(excessReturn)} />
-                <Stat label={<MetricLabel label="夏普" metric="sharpe" />} value={pick('sharpe') != null ? Number(pick('sharpe')).toFixed(2) : '—'} />
-                <Stat label={<MetricLabel label="索提诺" metric="sortino" />} value={pick('sortino') != null ? Number(pick('sortino')).toFixed(2) : '—'} />
-                <Stat label={<MetricLabel label="最大回撤" metric="maxDrawdown" />} value={pick('max_drawdown') != null ? fmtPct(pick('max_drawdown') as number) : '—'}
-                  color="#34d399" />
-                <Stat
-                  label={<MetricLabel label="蒙卡回撤 中位/95%" metric="mcDrawdown" />}
-                  value={`${pick('mc_maxdd_p50') != null ? fmtPct(pick('mc_maxdd_p50') as number) : '—'}/${pick('mc_maxdd_p95') != null ? fmtPct(pick('mc_maxdd_p95') as number) : '—'}`}
-                  color="#34d399"
-                />
+                {isCandidateExecution ? (
+                  <>
+                    <Stat label={<MetricLabel label="平均单笔收益" metric="avgReturn" />} value={pick('avg_return') != null ? fmtPct(Number(pick('avg_return'))) : '—'} color={statValueColor(pick('avg_return') as number)} />
+                    <Stat label={<MetricLabel label="中位收益" metric="medianReturn" />} value={pick('median_return') != null ? fmtPct(Number(pick('median_return'))) : '—'} color={statValueColor(pick('median_return') as number)} />
+                  </>
+                ) : (
+                  <>
+                    <Stat label={<MetricLabel label="总收益" metric="totalReturn" />} value={strategyReturn != null ? fmtPct(strategyReturn) : '—'}
+                      color={statValueColor(strategyReturn)} />
+                    <Stat label={<MetricLabel label="年化" metric="annualReturn" />} value={pick('annual_return') != null ? fmtPct(pick('annual_return') as number) : '—'}
+                      color={statValueColor(pick('annual_return') as number)} />
+                    <Stat label={<MetricLabel label="同期上证" metric="benchmarkReturn" />} value={benchmarkReturn != null ? fmtPct(benchmarkReturn) : '—'}
+                      color={statValueColor(benchmarkReturn)} />
+                    <Stat label={<MetricLabel label="超额收益" metric="excessReturn" />} value={excessReturn != null ? fmtPct(excessReturn) : '—'}
+                      color={statValueColor(excessReturn)} />
+                    <Stat label={<MetricLabel label="夏普" metric="sharpe" />} value={pick('sharpe') != null ? Number(pick('sharpe')).toFixed(2) : '—'} />
+                    <Stat label={<MetricLabel label="索提诺" metric="sortino" />} value={pick('sortino') != null ? Number(pick('sortino')).toFixed(2) : '—'} />
+                    <Stat label={<MetricLabel label="最大回撤" metric="maxDrawdown" />} value={pick('max_drawdown') != null ? fmtPct(pick('max_drawdown') as number) : '—'}
+                      color="#34d399" />
+                    <Stat
+                      label={<MetricLabel label="蒙卡回撤 中位/95%" metric="mcDrawdown" />}
+                      value={`${pick('mc_maxdd_p50') != null ? fmtPct(pick('mc_maxdd_p50') as number) : '—'}/${pick('mc_maxdd_p95') != null ? fmtPct(pick('mc_maxdd_p95') as number) : '—'}`}
+                      color="#34d399"
+                    />
+                  </>
+                )}
                 <Stat label={<MetricLabel label="胜率" metric="winRate" />} value={pick('win_rate') != null ? fmtPct(pick('win_rate') as number) : '—'} />
                 <Stat
                   label={<MetricLabel label="盈亏比" metric="profitFactor" />}

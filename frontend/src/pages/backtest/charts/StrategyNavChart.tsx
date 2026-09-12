@@ -10,6 +10,7 @@ interface Props {
 
 export function StrategyNavChart({ result }: Props) {
   const ct = useChartTheme()
+  const isSample = result.stats?.mode === 'full'
   // 可点击隐藏的图例(series name 为 key)。策略净值/回撤保持常显。
   const [hidden, setHidden] = useState<Set<string>>(new Set())
   // 保存上一次 dataZoom 的 start/end, 切换图例重绘(notMerge:true)时回填, 避免缩放窗口复位。
@@ -41,7 +42,7 @@ export function StrategyNavChart({ result }: Props) {
     const navValues = result.equity_curve.map(r => r.value)
     const benchmarkByDate = new Map((result.benchmark_curve ?? []).map(r => [r.date.slice(0, 10), r.close ?? r.value]))
     const benchmarkValues = dates.map(d => benchmarkByDate.get(d) ?? null)
-    const hasBenchmark = benchmarkValues.some(v => v != null)
+    const hasBenchmark = !isSample && benchmarkValues.some(v => v != null)
     const ddValues = result.drawdown_curve.map(r => r.value * 100)
     const positionValues = result.equity_curve.map(r => {
       if (r.exposure != null) return r.exposure * 100
@@ -85,12 +86,12 @@ export function StrategyNavChart({ result }: Props) {
         {
           type: 'value', gridIndex: 0,
           scale: true,
-          name: hasBenchmark ? '上证点位' : '策略资金',
+          name: hasBenchmark ? '上证点位' : isSample ? '样本曲线值' : '策略资金',
           nameTextStyle: { color: hasBenchmark ? ct.text : ct.text, fontSize: 10, padding: [0, 0, 4, 0] },
           axisLabel: {
             color: hasBenchmark ? ct.text : ct.text,
             fontSize: 10,
-            formatter: hasBenchmark ? ((v: number) => v.toFixed(0)) : axisMoneyFmt,
+            formatter: hasBenchmark ? ((v: number) => v.toFixed(0)) : isSample ? ((v: number) => v.toFixed(2)) : axisMoneyFmt,
           },
           splitLine: { lineStyle: { color: ct.grid } },
           axisLine: { show: false },
@@ -168,7 +169,7 @@ export function StrategyNavChart({ result }: Props) {
           let html = `<div style="font-size:11px;color:${ct.text};margin-bottom:4px">${date}</div>`
           for (const p of params) {
             if (p.value == null) continue
-            const isDrawdown = p.seriesName === '回撤'
+            const isDrawdown = (p.seriesName === '回撤' || p.seriesName === '样本曲线回撤')
             const isBenchmark = p.seriesName === '同期上证指数'
             const isPosition = p.seriesName === '仓位'
             html += `<div style="display:flex;justify-content:space-between;gap:16px">
@@ -178,7 +179,7 @@ export function StrategyNavChart({ result }: Props) {
                   ? `${(p.value as number).toFixed(2)}%`
                   : isBenchmark
                     ? `${valueFmt.format(p.value as number)} 点`
-                    : moneyFmt.format(p.value as number)
+                    : isSample ? valueFmt.format(p.value as number) : moneyFmt.format(p.value as number)
               }</span>
             </div>`
           }
@@ -187,7 +188,7 @@ export function StrategyNavChart({ result }: Props) {
       },
       series: [
         {
-          name: '净值',
+          name: isSample ? '样本收益曲线' : '净值',
           type: 'line',
           xAxisIndex: 0,
           yAxisIndex: hasBenchmark ? 1 : 0,
@@ -217,7 +218,7 @@ export function StrategyNavChart({ result }: Props) {
           lineStyle: { color: benchmarkColor, opacity: 0.55, width: 1, type: 'dashed' },
         }] : []),
         {
-          name: '回撤',
+          name: isSample ? '样本曲线回撤' : '回撤',
           type: 'line',
           xAxisIndex: 1,
           yAxisIndex: 2,
@@ -242,7 +243,7 @@ export function StrategyNavChart({ result }: Props) {
         }] : []),
       ],
     } as any
-  }, [result.equity_curve, result.drawdown_curve, result.benchmark_curve, result.run_id, ct, hidden])
+  }, [result.equity_curve, result.drawdown_curve, result.benchmark_curve, result.run_id, ct, hidden, isSample])
 
   const chartRef = useECharts(option, [result.run_id, ct], containerRef)
 
@@ -251,11 +252,11 @@ export function StrategyNavChart({ result }: Props) {
       <div className="flex flex-wrap items-center gap-4 px-4 pb-2">
         <span className="flex items-center gap-1.5 text-[10px] text-secondary">
           <span className="w-3 h-0.5 rounded bg-[#3b82f6]" />
-          策略净值
+          {isSample ? '样本收益曲线（非账户净值）' : '策略净值'}
         </span>
         <span className="flex items-center gap-1.5 text-[10px] text-secondary">
           <span className="w-3 h-0.5 rounded bg-[#f04438]" />
-          回撤
+          {isSample ? '样本曲线回撤' : '回撤'}
         </span>
         {result.equity_curve.some(r => r.exposure != null || (r.cash != null && r.value > 0)) && (
           <button
@@ -270,7 +271,7 @@ export function StrategyNavChart({ result }: Props) {
             仓位
           </button>
         )}
-        {(result.benchmark_curve?.length ?? 0) > 0 && (
+        {!isSample && (result.benchmark_curve?.length ?? 0) > 0 && (
           <button
             type="button"
             onClick={() => toggleLegend('同期上证指数')}
