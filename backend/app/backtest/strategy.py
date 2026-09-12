@@ -274,6 +274,8 @@ class StrategyDependencyResolver:
             "signal_limit_up",
             "signal_limit_down",
         }
+        # 按日期/板块生成的限幅不在 enriched 落盘列中, 仍须传给矩阵加载器。
+        matrix_columns.update(required_features & {"price_limit_pct"})
         return ResolvedFeaturePlan(
             base_columns=base_columns,
             intermediate_columns=frozenset(),
@@ -324,22 +326,31 @@ def build_matrix_cache_profile(
             continue
         if "1d" not in strategy.meta.get("timeframes", ["1d"]):
             continue
-        params = StrategyEngine.resolve_params(strategy)
+        default_params = StrategyEngine.resolve_params(strategy)
+        params = dict(default_params)
         for item in strategy.meta.get("params", []):
             if not isinstance(item, dict) or not item.get("id"):
                 continue
             if item.get("type") in {"int", "float"} and item.get("max") is not None:
                 params[str(item["id"])] = item["max"]
-        plans.append(resolver.resolve(
-            strategy,
-            params=params,
+        resolve_kwargs = dict(
             basic_filter={**dict(strategy.basic_filter or {}), **common_filter},
             entry_signals=strategy.entry_signals,
             exit_signals=strategy.exit_signals,
             overrides={},
             minute_fill=False,
             asset_type=asset_type,
-        ))
+        )
+        try:
+            plan = resolver.resolve(strategy, params=params, **resolve_kwargs)
+        except ValueError:
+            # 各参数的 max 不保证能同时成立 (例如 strong < mild)。
+            # 这里只是扩大共用缓存的探测; 实际请求的依赖已由 requested_plan 保底。
+            # 回退合法默认值, 不放宽实际策略执行的参数校验。
+            if params == default_params:
+                raise
+            plan = resolver.resolve(strategy, params=default_params, **resolve_kwargs)
+        plans.append(plan)
         forward_bars = max(forward_bars, int(strategy.max_hold_days or 0))
 
     if not plans:
