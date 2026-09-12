@@ -698,8 +698,8 @@ class FuyaoProvider:
         try:
             events = self._load_adj_events(set(symbols), start_time, end_time)
         except FuyaoError as e:
-            logger.warning("扶摇除权因子 dump 加载失败: %s", e)
-            return pl.DataFrame(schema=schema)
+            # 下载失败不能等同于无事件, 否则管道会继续生成未复权 enriched。
+            raise FuyaoError(f"扶摇除权因子 dump 加载失败: {e}") from e
         if events.is_empty():
             return pl.DataFrame(schema=schema)
 

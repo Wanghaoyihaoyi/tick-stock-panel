@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import polars as pl
@@ -31,6 +32,22 @@ from app.tickflow.repository import KlineRepository
 logger = logging.getLogger(__name__)
 
 ProgressCb = Callable[..., None]
+
+
+def _adj_sync_start(
+    repo: KlineRepository, daily_range_start: date | None, end: datetime,
+) -> datetime:
+    start = (
+        datetime.combine(daily_range_start, datetime.min.time())
+        if daily_range_start is not None else end - timedelta(days=15)
+    )
+    if not any((repo.store.data_dir / "adj_factor").rglob("*.parquet")):
+        # 首次因子同步或下载失败后重试, 要覆盖已有日K, 不能只补近期事件。
+        # 真实无事件也可能没有文件; 允许重复宽窗口, 避免把缺失误当已同步。
+        earliest = repo.earliest_daily_date()
+        if earliest is not None:
+            start = min(start, datetime.combine(earliest, datetime.min.time()))
+    return start
 
 
 def _prune_partial_enriched_partitions(daily_dir: Path, enriched_dir: Path) -> list[str]:
@@ -390,12 +407,7 @@ def run_now(
     if can_sync_adj:
         from datetime import datetime, timedelta
         adj_end = datetime.now()
-        if daily_range_start is not None:
-            adj_start = datetime.combine(daily_range_start, datetime.min.time())
-        else:
-            # 日K实时增量/跳过时, 除权兜底拉最近 N 天, 覆盖周末/长假/停机期间的新除权事件。
-            # 15 天: 覆盖春节/国庆最长约10天长假 + 故障恢复缓冲; sync_adj_factor 内部 merge+unique 幂等, 多拉无副作用。
-            adj_start = adj_end - timedelta(days=15)
+        adj_start = _adj_sync_start(repo, daily_range_start, adj_end)
         adj_start_str = adj_start.strftime("%Y-%m-%d")
         adj_end_str = adj_end.strftime("%Y-%m-%d")
         emit("sync_adj", 50, f"获取除权因子 [{adj_start_str} ~ {adj_end_str}]…")

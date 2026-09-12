@@ -1209,16 +1209,43 @@ def test_adj_etf_and_empty_symbols_return_empty(monkeypatch):
     assert etf.is_empty()
 
 
-def test_adj_dump_unavailable_returns_empty(monkeypatch):
-    """dump 加载失败软返回空(不阻断管道), 不抛异常。"""
+def test_adj_dump_unavailable_raises(monkeypatch):
+    """明确下载失败不得伪装成成功但没有除权事件。"""
     provider = _hist_provider(monkeypatch, _FakeHistClient({}))
 
     def _boom(dump_kind, cache_prefix):
         raise fc.FuyaoError("dump 下载网络失败")
 
     provider._ensure_dump = _boom  # type: ignore[assignment]
-    df = provider.get_adj_factors(["600519.SH"], None, None)
-    assert df.is_empty() and df.columns == ["symbol", "trade_date", "ex_factor"]
+    with pytest.raises(fc.FuyaoError, match="dump 下载网络失败"):
+        provider.get_adj_factors(["600519.SH"], None, None)
+
+
+@pytest.mark.parametrize("download_failed", [False, True])
+def test_adj_sync_distinguishes_no_events_from_download_failure(monkeypatch, download_failed):
+    from unittest.mock import Mock
+
+    from app.data_providers import custom as custom_sources
+    from app.services import kline_sync
+
+    provider = _adj_provider(monkeypatch, [], {})
+    if download_failed:
+        def unavailable(dump_kind, cache_prefix):
+            raise fc.FuyaoError("dump 下载网络失败")
+
+        provider._ensure_dump = unavailable
+    monkeypatch.setattr(kline_sync.preferences, "get_adj_factor_provider", lambda: "fuyao")
+    monkeypatch.setattr(custom_sources, "provider_has_dataset", lambda *args: True)
+    monkeypatch.setattr(custom_sources, "get_provider", lambda name: provider)
+    write = Mock()
+    monkeypatch.setattr(kline_sync, "_atomic_write_parquet", write)
+    # 无需访问仓库: 失败向管道传播, 真实空事件才返回零新增。
+    if download_failed:
+        with pytest.raises(fc.FuyaoError, match="dump 下载网络失败"):
+            kline_sync.sync_adj_factor(["600519.SH"], None, None)
+    else:
+        assert kline_sync.sync_adj_factor(["600519.SH"], None, None) == (0, [])
+    write.assert_not_called()
 
 
 def test_adj_progress_callback_per_symbol(monkeypatch):
