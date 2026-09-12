@@ -314,6 +314,17 @@ export function ScreenerTable({
         )
       }
       case 'score': {
+        if (r.shareholder_review_required) {
+          const review = r.shareholder_review
+          const a = review?.scoring
+          const range = a?.score_range
+          return <td key={col.id} className="px-3 py-2 text-right num tabular-nums"
+            title={a ? [...a.vetoes, ...a.missing, review.review_note].join('；') : '该日期尚未完成股东与公告核验'}>
+            <div className="text-accent">{a?.final_score != null ? `${a.final_score.toFixed(1)} · ${a.grade}`
+              : range ? (range[0] === range[1] ? `${range[0].toFixed(1)} 参考` : `${range[0].toFixed(1)}–${range[1].toFixed(1)}`) : '—'}</div>
+            <div className="text-xs text-amber-400">{a?.status === 'excluded' ? '否决' : a?.status === 'complete' ? '综合评分' : '待核验 · 非最终分'}</div>
+          </td>
+        }
         const numCls = 'px-3 py-2 text-right num tabular-nums'
         return (
           <td key={col.id} className={numCls}>

@@ -8,6 +8,8 @@
 // ===== Query Key 工厂 =====
 
 export const QK = {
+  shareholderAssessments: (id: string, day: string) => ['shareholder-assessments', id, day] as const,
+  disclosureReports: (symbol: string) => ['disclosure-reports', symbol] as const,
   // 全局 / 共享 (Layout 预取)
   capabilities:   ['capabilities'] as const,
   settings:       ['settings'] as const,

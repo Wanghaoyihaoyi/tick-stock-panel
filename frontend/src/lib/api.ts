@@ -3843,3 +3843,66 @@ export interface AnalysisMenu {
   updated_at?: string | null
   builtin?: boolean
 }
+
+// 股东与公告: 独立于行情策略评分的联网资料核验。
+export interface DisclosureEvidence {
+  title: string
+  url: string
+  published_on: string
+  period: string
+  excerpt: string
+}
+export interface DisclosureReport {
+  id: string
+  symbol: string
+  name: string
+  as_of: string
+  searched_at: string
+  status: 'needs_review'
+  sections: Array<{
+    topic: string
+    label: string
+    status: 'needs_review' | 'missing'
+    summary: string
+    evidence: DisclosureEvidence[]
+  }>
+}
+export const disclosureResearchApi = {
+  reports: (symbol: string) => request<{ reports: DisclosureReport[]; supported: boolean }>(
+    `/api/disclosure-research/reports?symbol=${encodeURIComponent(symbol)}`, { quiet: true },
+  ),
+  research: (symbol: string, as_of: string, refresh: boolean) => request<{ report: DisclosureReport }>(
+    '/api/disclosure-research/research', {
+      method: 'POST', body: JSON.stringify({ symbol, as_of, refresh }), timeoutMs: 630_000, quiet: true,
+    },
+  ),
+}
+
+export interface ShareholderAssessmentResult {
+  review_sources: Array<{ url: string; title: string; published_on: string }>
+  symbol: string
+  name: string
+  as_of: string
+  review_note: string
+  reviewed_at: string
+  scoring: {
+    status: 'complete' | 'incomplete' | 'excluded'
+    final_score: number | null
+    raw_score: number | null
+    known_raw_score: number
+    chip_score: number
+    trend_score: number
+    shareholder_score: number | null
+    known_shareholder_score: number
+    score_range: [number, number]
+    grade: string | null
+    factors: Record<string, { score: number | null; max_score: number; value: unknown }>
+    missing: string[]
+    vetoes: string[]
+  }
+}
+export const shareholderAssessmentApi = {
+  list: (strategyId: string, asOf: string) => request<{
+    enabled: boolean; assessments: Record<string, ShareholderAssessmentResult>
+  }>(`/api/disclosure-research/assessments?strategy_id=${encodeURIComponent(strategyId)}&as_of=${asOf}`, { quiet: true }),
+}

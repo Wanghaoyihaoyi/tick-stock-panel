@@ -1,3 +1,4 @@
+import { useReviewedScores } from '@/custom/disclosure/useReviewedScores'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
@@ -140,9 +141,10 @@ export function Screener() {
 
   // 对原始结果应用过滤 (memo: 否则每次渲染都对全部结果行过滤,
   // 且新数组身份会击穿下游 displayRows 的 memo)
+  const reviewedRows = useReviewedScores(activeStrategy, result?.as_of ?? asOf, result?.rows ?? [])
   const filteredRows = useMemo(
-    () => (result ? applyFilter(result.rows, filter) : []),
-    [result, filter],
+    () => applyFilter(reviewedRows, filter),
+    [reviewedRows, filter],
   )
 
   const { data: prefs } = usePreferences()
@@ -886,7 +888,7 @@ export function Screener() {
                     <span className="text-secondary">{strategyIdToName[activeStrategy] ?? ''}</span>
                   )}
                   <TrendingUp className="h-4 w-4 text-accent" />
-                  {showAll ? '全部' : ''}命中 <span className="text-accent num">{displayRows.length}</span> 只
+                  {!showAll && activeStrategy === 'custom_mtxs8bfe' ? '技术候选' : `${showAll ? '全部' : ''}命中`} <span className="text-accent num">{displayRows.length}</span> 只
                   {filterActive(filter) && displayRows.length !== (showAll ? allRows.length : result!.total) && (
                     <span className="text-muted text-xs">/ {showAll ? allRows.length : result!.total}</span>
                   )}
