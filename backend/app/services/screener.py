@@ -272,7 +272,10 @@ class ScreenerService:
         )
 
         warmup = 60
-        start = target_date - timedelta(days=min((lookback_days + warmup) * 2, 180))
+        # 按已有交易日取足策略窗口和指标预热; 180 个自然日不足以覆盖
+        # 筹码等长窗口策略, 节假日也不能通过固定自然日倍数推算。
+        prior_dates = self._prior_partition_dates(target_date, lookback_days + warmup)
+        start = prior_dates[-1] if prior_dates else target_date
 
         enriched_dir = self.repo.store.data_dir / self._enriched_dirname
         # 同 _compute_enriched_full: turnover_rate 存储列随行透传 (#187)
